@@ -1,0 +1,81 @@
+services:
+  # RabbitMQ Service
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5673:5672"       # AMQP protocol (RabbitMQ)
+      - "15673:15672"     # Web UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    restart: always
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Subscriber Service (rabbitmq-subscriber-server)
+  rabbitmq-subscriber-server:
+    build:
+      context: ./rabbitmq-subscriber-server
+    
+    # ensure that rabbitMQ is up and running before starting the subscriber
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    container_name: rabbitmq-subscriber-server
+    env_file:
+      - ./rabbitmq-subscriber-server/.env
+    environment:
+      AMQP_URL: amqp://rabbitmq:5672
+    command: ["node", "main.js"]
+    restart: always
+
+  # Publisher Service (rover-telemetry-server)
+  rover-telemetry-server:
+    build:
+      context: ./rover-telemetry-server
+    container_name: rover-telemetry-server
+    env_file:
+      - ./rover-telemetry-server/.env
+    environment:
+      AMQP_URL: amqp://rabbitmq:5672
+    command: ["node", "main.js"]
+    ports:
+      - "3002:3002" # Expose port
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: always
+
+  # WebSocket Driving Server (drive-control-server)
+  drive-control-server:
+    build:
+      context: ./drive-control-server
+    container_name: drive-control-server
+    environment:
+      AMQP_URL: amqp://rabbitmq:5672
+    command: ["node", "main.js"]
+    ports:
+      - "8443:8443" # Expose port if needed
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: always
+
+  # FastAPI Streaming Service
+  streaming_service:
+    build:
+      context: ./camera-stream-server
+    container_name: streaming_service
+    ports:
+      - "3001:3001"
+    restart: always
+
+volumes:
+  rabbitmq_data:
